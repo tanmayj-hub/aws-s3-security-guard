@@ -1,7 +1,7 @@
 import argparse
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -19,6 +19,13 @@ DESIRED_PUBLIC_ACCESS_BLOCK = {
 }
 
 
+def parse_csv_list(value: Optional[str]) -> Optional[List[str]]:
+    if not value:
+        return None
+    items = [x.strip() for x in value.split(",") if x.strip()]
+    return items or None
+
+
 def read_json(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -30,11 +37,14 @@ def write_json(path: str, data: Dict[str, Any]) -> None:
         f.write("\n")
 
 
-def remediate(findings_report: Dict[str, Any], approve: bool) -> Dict[str, Any]:
+def remediate(findings_report: Dict[str, Any], approve: bool, allow_buckets: Optional[List[str]]) -> Dict[str, Any]:
     s3 = boto3.client("s3")
 
     findings: List[Dict[str, Any]] = findings_report.get("findings", [])
     targets = [f for f in findings if f.get("severity") == "CRITICAL"]
+
+    if allow_buckets:
+        targets = [t for t in targets if t.get("bucket") in allow_buckets]
 
     actions: List[Dict[str, Any]] = []
 
@@ -88,6 +98,7 @@ def remediate(findings_report: Dict[str, Any], approve: bool) -> Dict[str, Any]:
         "service": "s3",
         "remediator": "aws-security-guard",
         "approve_mode": approve,
+        "allow_buckets": allow_buckets or [],
         "targets": len(targets),
         "actions": actions,
         "summary": {
@@ -103,6 +114,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Remediate CRITICAL S3 findings by enforcing Block Public Access.")
     parser.add_argument("--input", default="findings.json", help="Input findings JSON from scanner.")
     parser.add_argument("--output", default="remediation.json", help="Output remediation report JSON.")
+    parser.add_argument("--allow-buckets", default=None, help="Comma-separated allowlist of bucket names.")
     parser.add_argument(
         "--approve",
         action="store_true",
@@ -110,11 +122,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    allow_buckets = parse_csv_list(args.allow_buckets)
     report = read_json(args.input)
-    remediation_report = remediate(report, approve=args.approve)
+    remediation_report = remediate(report, approve=args.approve, allow_buckets=allow_buckets)
     write_json(args.output, remediation_report)
 
-    # Return non-zero only if we attempted apply and had failures.
     if args.approve and remediation_report["summary"]["failed"] > 0:
         return 1
     return 0
