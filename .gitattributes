@@ -1,0 +1,14 @@
+# Normalize line endings
+* text=auto eol=lf
+
+# Treat these as text
+*.md text
+*.yml text
+*.yaml text
+*.py text
+
+# Prevent diffs for common binaries if added later
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary

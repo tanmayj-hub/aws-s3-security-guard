@@ -1,5 +1,13 @@
-venv/
+# Python
 __pycache__/
+*.pyc
+
+# Virtual env
+venv/
+
+# Outputs
 findings*.json
 remediation*.json
 
+# OS
+.DS_Store
