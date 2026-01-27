@@ -19,6 +19,54 @@ This repo includes a **production-style GitHub Actions integration** (scheduled 
 
 ---
 
+## Architecture
+
+### GitHub Actions pipeline (Scan + Remediate)
+
+```mermaid
+flowchart LR
+  classDef box fill:#1f2937,stroke:#9ca3af,color:#ffffff,stroke-width:1px;
+  classDef store fill:#111827,stroke:#9ca3af,color:#ffffff,stroke-width:1px;
+  classDef gate fill:#374151,stroke:#f59e0b,color:#ffffff,stroke-width:1px;
+
+  A1["Scan Workflow\ncron + manual"]:::box
+  A2["Remediate Workflow\nmanual dispatch"]:::box
+  GATE["Approval Gate\nEnvironment production"]:::gate
+
+  F1["Artifact\nfindings.json"]:::store
+  F2["Artifacts\nbefore.json • remediation.json • after.json"]:::store
+
+  A1 -->|"run scanner.py\nupload findings\nfail if CRITICAL"| F1
+  A2 -->|"baseline scan"| F2
+  A2 --> GATE -->|"approved"| A2a["apply remediation\napprove true\nverify scan"]:::box
+  A2a -->|"upload reports"| F2
+````
+
+### AWS side (OIDC → STS → IAM Roles → S3)
+
+```mermaid
+flowchart LR
+  classDef box fill:#1f2937,stroke:#9ca3af,color:#ffffff,stroke-width:1px;
+  classDef store fill:#111827,stroke:#9ca3af,color:#ffffff,stroke-width:1px;
+
+  OIDC["OIDC Provider\n(token.actions.githubusercontent.com)"]:::box
+  STS["STS\nAssumeRoleWithWebIdentity"]:::box
+
+  RSCAN["IAM Role\nSecurityGuardScanRole\nread only"]:::box
+  RREM["IAM Role\nSecurityGuardRemediateRole\nwrite"]:::box
+
+  S3["S3\nBuckets"]:::store
+
+  OIDC --> STS
+  STS --> RSCAN
+  STS --> RREM
+
+  RSCAN -->|"List buckets\nGet public access block"| S3
+  RREM -->|"Put public access block"| S3
+```
+
+---
+
 ## Optional (Learning Mode): Cursor + AWS MCP
 This project was initially developed following a guided workflow using **Cursor + AWS MCP**.
 
@@ -186,3 +234,5 @@ This project was completed as part of a guided learning workflow from **NextWork
 * OIDC-based AWS auth (no long-lived AWS keys)
 * Controlled remediation workflow (approval gate + verification scan)
 * Fork-friendly setup (role ARNs stored in GitHub Secrets)
+
+
