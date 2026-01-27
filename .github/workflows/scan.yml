@@ -22,48 +22,55 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-          - name: Checkout
-            uses: actions/checkout@v4
-    
-          - name: Setup Python
-            uses: actions/setup-python@v5
-            with:
-              python-version: "3.12"
-    
-          - name: Install dependencies
-            run: |
-              python -m pip install --upgrade pip
-              pip install -r requirements.txt
-    
-          - name: Configure AWS credentials (OIDC)
-            uses: aws-actions/configure-aws-credentials@v4
-            with:
-              role-to-assume: arn:aws:iam::944053746993:role/SecurityGuardScanRole
-              aws-region: us-east-1
-    
-          - name: Run scanner
-            id: run_scan
-            shell: bash
-            run: |
-              set +e
-              if [ -n "${{ github.event.inputs.allow_buckets }}" ]; then
-                python scanner.py --output findings.json --fail-on CRITICAL --allow-buckets "${{ github.event.inputs.allow_buckets }}"
-              else
-                python scanner.py --output findings.json --fail-on CRITICAL
-              fi
-              echo "exit_code=$?" >> $GITHUB_OUTPUT
-              set -e
-    
-          - name: Upload findings artifact
-            uses: actions/upload-artifact@v4
-            with:
-              name: s3-findings
-              path: findings.json
-              if-no-files-found: error
-    
-          - name: Fail if findings exist
-            if: ${{ steps.run_scan.outputs.exit_code != '0' }}
-            run: |
-              echo "Scanner reported security findings or errors. Exit code: ${{ steps.run_scan.outputs.exit_code }}"
-              exit ${{ steps.run_scan.outputs.exit_code }}
-    
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.AWS_SCAN_ROLE_ARN }}" ]; then
+            echo "Missing GitHub secret: AWS_SCAN_ROLE_ARN"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_SCAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run scanner
+        id: run_scan
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${{ github.event.inputs.allow_buckets }}" ]; then
+            python scanner.py --output findings.json --fail-on CRITICAL --allow-buckets "${{ github.event.inputs.allow_buckets }}"
+          else
+            python scanner.py --output findings.json --fail-on CRITICAL
+          fi
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          set -e
+
+      - name: Upload findings artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-findings
+          path: findings.json
+          if-no-files-found: error
+
+      - name: Fail if findings exist
+        if: ${{ steps.run_scan.outputs.exit_code != '0' }}
+        run: |
+          echo "Scanner reported security findings or errors. Exit code: ${{ steps.run_scan.outputs.exit_code }}"
+          exit ${{ steps.run_scan.outputs.exit_code }}

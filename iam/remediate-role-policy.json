@@ -1,0 +1,24 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "ListBuckets",
+        "Effect": "Allow",
+        "Action": "s3:ListAllMyBuckets",
+        "Resource": "*"
+      },
+      {
+        "Sid": "ReadPublicAccessBlock",
+        "Effect": "Allow",
+        "Action": "s3:GetBucketPublicAccessBlock",
+        "Resource": "arn:aws:s3:::*"
+      },
+      {
+        "Sid": "WritePublicAccessBlock",
+        "Effect": "Allow",
+        "Action": "s3:PutBucketPublicAccessBlock",
+        "Resource": "arn:aws:s3:::*"
+      }
+    ]
+  }
+  

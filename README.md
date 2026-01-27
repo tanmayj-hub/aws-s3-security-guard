@@ -1,12 +1,12 @@
 # AWS S3 Security Guard (Scanner + Remediation)
 
 A lightweight AWS security automation project that:
-- Scans all S3 buckets for **public access misconfigurations**
+- Scans S3 buckets for **public access misconfigurations**
 - Produces **severity-based findings** (e.g., CRITICAL) in a JSON report
 - Optionally remediates CRITICAL findings by enforcing **S3 Block Public Access**
 - Verifies fixes by re-running the scanner
 
-This repo also includes a **production-style GitHub Actions integration** (scheduled scans + manual remediation with approvals).
+This repo includes a **production-style GitHub Actions integration** (scheduled scans + manual remediation with approvals).
 
 ---
 
@@ -19,54 +19,27 @@ This repo also includes a **production-style GitHub Actions integration** (sched
 
 ---
 
-## What the Scanner Checks
-For each bucket, the scanner validates the 4 S3 Block Public Access controls:
-- `BlockPublicAcls`
-- `IgnorePublicAcls`
-- `BlockPublicPolicy`
-- `RestrictPublicBuckets`
+## Optional (Learning Mode): Cursor + AWS MCP
+This project was initially developed following a guided workflow using **Cursor + AWS MCP**.
 
-If the Public Access Block config is missing or incomplete, it reports a **CRITICAL** finding.
+**What it was used for:**
+- Quickly creating test S3 buckets and misconfigurations for validation
+- Running AWS actions through natural language (“fix critical S3 buckets”) during learning
+
+**Do you need it for production/GitHub Actions?**
+No — the production pipeline in this repo runs using **Python scripts + GitHub Actions + AWS OIDC**. Cursor/MCP is optional and not required to replicate the automation.
 
 ---
 
-## Local Setup
+## Local Setup (Windows PowerShell)
 
-### 1) Create and activate a venv (Windows PowerShell)
 ```powershell
 python -m venv venv
 venv\Scripts\activate
-````
-
-### 2) Install dependencies
-
-```powershell
 pip install -r requirements.txt
-```
-
-### 3) Configure AWS credentials (local)
-
-```powershell
 aws configure
-```
-
-### 4) Run the scanner
-
-```powershell
 python scanner.py --output findings.json --fail-on CRITICAL
-```
-
-### 5) Remediate (dry-run)
-
-```powershell
-python remediate.py --input findings.json --output remediation.json
-```
-
-### 6) Remediate (apply changes)
-
-```powershell
-python remediate.py --input findings.json --approve --output remediation.json
-```
+````
 
 ---
 
@@ -84,33 +57,120 @@ python remediate.py --input findings.json --approve --output remediation.json
 
   * Manual trigger only
   * Runs: scan → remediate → re-scan verification
-  * Supports `approve=true` to apply changes
+  * `approve=false` = dry-run, `approve=true` = apply changes
   * Recommended: keep remediation behind an approval gate via GitHub Environments
 
-### Secure AWS Auth (OIDC)
+### Important: no ARNs in the repo
 
-This repo is designed to use **GitHub OIDC → AWS IAM Roles**:
+To keep this repo fork-friendly (and avoid exposing account-specific ARNs), workflows read role ARNs from **GitHub Secrets**:
 
-* `SecurityGuardScanRole` (read-only)
-* `SecurityGuardRemediateRole` (write: PutBucketPublicAccessBlock)
-
-Update the role ARNs in workflows to match your AWS account.
+* `AWS_SCAN_ROLE_ARN`
+* `AWS_REMEDIATE_ROLE_ARN`
 
 ---
 
-## Safety Notes
+# Replication Steps (Fork-friendly)
 
-* Remediation defaults to **dry-run** unless explicitly approved.
-* Use an allowlist for testing so you only modify your test bucket.
+## 1) Create GitHub OIDC Provider in AWS (one-time per AWS account)
+
+AWS Console → IAM → Identity providers → Add provider:
+
+* Provider URL: `https://token.actions.githubusercontent.com`
+* Audience: `sts.amazonaws.com`
+
+## 2) Create IAM roles in YOUR AWS account
+
+Create two roles:
+
+* `SecurityGuardScanRole` (read-only scan)
+* `SecurityGuardRemediateRole` (applies S3 Block Public Access)
+
+### 2A) Trust policy (Web Identity)
+
+When creating each role, choose **Web identity** and use:
+
+* Provider: `token.actions.githubusercontent.com`
+* Audience: `sts.amazonaws.com`
+
+Then set the trust policy to this (replace placeholders):
+
+* `<AWS_ACCOUNT_ID>` = your AWS account id
+* `OWNER/REPO` = your GitHub repo (fork), e.g. `yourname/aws-s3-security-guard`
+* Branch is `main`
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<AWS_ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:OWNER/REPO:ref:refs/heads/main"
+        }
+      }
+    }
+  ]
+}
+```
+
+### 2B) Permissions policies (copy-paste)
+
+This repo provides ready-to-use IAM policies in `/iam/`:
+
+* Scan role policy: `iam/scan-role-policy.json`
+* Remediate role policy: `iam/remediate-role-policy.json`
+
+Attach them to the roles as inline policies or managed policies.
+
+**Scan Role requires:**
+
+* `s3:ListAllMyBuckets`
+* `s3:GetBucketPublicAccessBlock`
+
+**Remediate Role requires:**
+
+* same as scan role, plus `s3:PutBucketPublicAccessBlock`
+
+---
+
+## 3) Add GitHub Secrets in your repo
+
+GitHub repo → Settings → Secrets and variables → Actions → **Secrets**:
+
+* `AWS_SCAN_ROLE_ARN` = `arn:aws:iam::<AWS_ACCOUNT_ID>:role/SecurityGuardScanRole`
+* `AWS_REMEDIATE_ROLE_ARN` = `arn:aws:iam::<AWS_ACCOUNT_ID>:role/SecurityGuardRemediateRole`
+
+---
+
+## 4) Add an approval gate for remediation (recommended)
+
+GitHub repo → Settings → Environments:
+
+* Create environment: `production`
+* Add required reviewers
+
+---
+
+## 5) Run workflows
+
+* Actions → **S3 Security Scan**
+* Actions → **S3 Remediation (Manual)**
 
 ---
 
 ## Attribution
 
-This project was completed as part of a guided learning workflow from **NextWork**.
-I extended it for a production-style GitHub setup by adding:
+This project was completed as part of a guided learning workflow from **NextWork - Build an AI Security Guard for AWS** and extended with:
 
-* GitHub Actions scheduled scanning
-* OIDC-based AWS auth (no long-lived keys)
-* Controlled remediation workflow (manual approval + verification scan)
-* Reproducible repo structure and documentation
+* Production-style GitHub Actions pipeline
+* OIDC-based AWS auth (no long-lived AWS keys)
+* Controlled remediation workflow (approval gate + verification scan)
+* Fork-friendly setup (role ARNs stored in GitHub Secrets)

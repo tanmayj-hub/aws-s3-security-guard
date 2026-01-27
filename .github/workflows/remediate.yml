@@ -38,11 +38,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.AWS_REMEDIATE_ROLE_ARN }}" ]; then
+            echo "Missing GitHub secret: AWS_REMEDIATE_ROLE_ARN"
+            exit 1
+          fi
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::944053746993:role/SecurityGuardRemediateRole
-          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_REMEDIATE_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Run scanner (baseline)
         shell: bash
