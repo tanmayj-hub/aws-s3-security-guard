@@ -33,14 +33,13 @@ No — the production pipeline in this repo runs using **Python scripts + GitHub
 
 ## Local Setup (Windows PowerShell)
 
-```md
 ```powershell
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 aws configure
 python scanner.py --output findings.json --fail-on CRITICAL
-```
+````
 
 ---
 
