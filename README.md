@@ -71,28 +71,40 @@ To keep this repo fork-friendly (and avoid exposing account-specific ARNs), work
 
 # Replication Steps (Fork-friendly)
 
-## 1) Create GitHub OIDC Provider in AWS (one-time per AWS account)
+## 0) Create the Web Identity Provider in AWS (GitHub OIDC) — one-time per AWS account
 
-AWS Console → IAM → Identity providers → Add provider:
+This is what enables the **“Web identity”** option when you create IAM roles for GitHub Actions.
 
+AWS Console → **IAM** → **Identity providers** → **Add provider**
+
+* Provider type: **OpenID Connect**
 * Provider URL: `https://token.actions.githubusercontent.com`
 * Audience: `sts.amazonaws.com`
 
-## 2) Create IAM roles in YOUR AWS account
+✅ After this is created, you will be able to select **Trusted entity type → Web identity** when creating roles.
+
+---
+
+## 1) Create IAM roles in YOUR AWS account
 
 Create two roles:
 
 * `SecurityGuardScanRole` (read-only scan)
 * `SecurityGuardRemediateRole` (applies S3 Block Public Access)
 
-### 2A) Trust policy (Web Identity)
+### 1A) Create role using Web Identity
 
-When creating each role, choose **Web identity** and use:
+For **each** role:
 
-* Provider: `token.actions.githubusercontent.com`
-* Audience: `sts.amazonaws.com`
+1. AWS Console → IAM → Roles → **Create role**
+2. Trusted entity type: **Web identity**
+3. Identity provider: `token.actions.githubusercontent.com`
+4. Audience: `sts.amazonaws.com`
+5. Continue → create the role (you’ll attach permissions next)
 
-Then set the trust policy to this (replace placeholders):
+### 1B) Trust policy (Web Identity)
+
+After role creation, update the trust policy to this (replace placeholders):
 
 * `<AWS_ACCOUNT_ID>` = your AWS account id
 * `OWNER/REPO` = your GitHub repo (fork), e.g. `yourname/aws-s3-security-guard`
@@ -121,7 +133,7 @@ Then set the trust policy to this (replace placeholders):
 }
 ```
 
-### 2B) Permissions policies (copy-paste)
+### 1C) Permissions policies (copy-paste)
 
 This repo provides ready-to-use IAM policies in `/iam/`:
 
@@ -141,7 +153,7 @@ Attach them to the roles as inline policies or managed policies.
 
 ---
 
-## 3) Add GitHub Secrets in your repo
+## 2) Add GitHub Secrets in your repo
 
 GitHub repo → Settings → Secrets and variables → Actions → **Secrets**:
 
@@ -150,7 +162,7 @@ GitHub repo → Settings → Secrets and variables → Actions → **Secrets**:
 
 ---
 
-## 4) Add an approval gate for remediation (recommended)
+## 3) Add an approval gate for remediation (recommended)
 
 GitHub repo → Settings → Environments:
 
@@ -159,7 +171,7 @@ GitHub repo → Settings → Environments:
 
 ---
 
-## 5) Run workflows
+## 4) Run workflows
 
 * Actions → **S3 Security Scan**
 * Actions → **S3 Remediation (Manual)**
