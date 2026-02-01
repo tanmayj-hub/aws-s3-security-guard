@@ -16,6 +16,7 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
+  ENCRYPTION_SCANNER_FUNCTION_NAME: s3-security-scanner
 
 jobs:
   scan:
@@ -49,7 +50,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_SCAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Run scanner
+      - name: Run public access scanner
         id: run_scan
         shell: bash
         run: |
@@ -67,6 +68,28 @@ jobs:
         with:
           name: s3-findings
           path: findings.json
+          if-no-files-found: error
+
+      # --- NEW: Invoke Encryption AI Scanner Lambda ---
+      - name: Invoke encryption AI scanner (Lambda)
+        shell: bash
+        run: |
+          echo "Invoking Lambda: ${{ env.ENCRYPTION_SCANNER_FUNCTION_NAME }}"
+
+          aws lambda invoke \
+            --function-name "${{ env.ENCRYPTION_SCANNER_FUNCTION_NAME }}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{"trigger":"github-actions","scan":"s3-encryption"}' \
+            encryption_scan_response.json
+
+          echo "Lambda response saved to encryption_scan_response.json"
+          cat encryption_scan_response.json
+
+      - name: Upload encryption scan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-encryption-ai-scan
+          path: encryption_scan_response.json
           if-no-files-found: error
 
       - name: Fail if findings exist

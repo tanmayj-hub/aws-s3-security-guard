@@ -1,3 +1,4 @@
+````md
 # AWS S3 Security Guard (Scanner + Remediation)
 
 A lightweight AWS security automation project that:
@@ -8,6 +9,11 @@ A lightweight AWS security automation project that:
 
 This repo includes a **production-style GitHub Actions integration** (scheduled scans + manual remediation with approvals).
 
+**New (Add-on Module): Encryption AI Scanner**
+- Invokes an AWS Lambda function (`s3-security-scanner`) to scan S3 bucket **encryption posture**
+- Returns an AI-generated security summary (Gemini) plus raw per-bucket encryption results
+- Runs automatically from the same scheduled GitHub Actions workflow (no EventBridge required)
+
 ---
 
 ## Tech Stack
@@ -16,12 +22,14 @@ This repo includes a **production-style GitHub Actions integration** (scheduled 
 - **AWS S3**
 - **GitHub Actions**
 - **AWS IAM + GitHub OIDC** (no long-lived AWS keys)
+- **AWS Lambda** (encryption scanner add-on)
+- **Gemini API (google-genai)** (AI analysis inside the Lambda)
 
 ---
 
 ## Architecture
 
-### GitHub Actions pipeline (Scan + Remediate)
+### GitHub Actions pipeline (Scan + Remediate + Encryption AI Scan)
 
 ```mermaid
 flowchart LR
@@ -34,15 +42,20 @@ flowchart LR
   GATE["Approval Gate\nEnvironment production"]:::gate
 
   F1["Artifact\nfindings.json"]:::store
+  F3["Artifact\nencryption_scan_response.json"]:::store
   F2["Artifacts\nbefore.json • remediation.json • after.json"]:::store
 
+  L1["Lambda\ns3-security-scanner\n(encryption + AI)"]:::box
+
   A1 -->|"run scanner.py\nupload findings\nfail if CRITICAL"| F1
+  A1 -->|"invoke Lambda\nupload response"| L1 --> F3
+
   A2 -->|"baseline scan"| F2
   A2 --> GATE -->|"approved"| A2a["apply remediation\napprove true\nverify scan"]:::box
   A2a -->|"upload reports"| F2
 ````
 
-### AWS side (OIDC → STS → IAM Roles → S3)
+### AWS side (OIDC → STS → IAM Roles → S3 + Lambda)
 
 ```mermaid
 flowchart LR
@@ -55,7 +68,11 @@ flowchart LR
   RSCAN["IAM Role\nSecurityGuardScanRole\nread only"]:::box
   RREM["IAM Role\nSecurityGuardRemediateRole\nwrite"]:::box
 
+  LAMBDA["Lambda\ns3-security-scanner"]:::box
+  LROLE["IAM Role\nLambdaS3ScannerRole\nS3 encryption read + logs"]:::box
+
   S3["S3\nBuckets"]:::store
+  AI["Gemini API\n(GOOGLE_API_KEY)"]:::store
 
   OIDC --> STS
   STS --> RSCAN
@@ -63,16 +80,23 @@ flowchart LR
 
   RSCAN -->|"List buckets\nGet public access block"| S3
   RREM -->|"Put public access block"| S3
+
+  RSCAN -->|"InvokeFunction"| LAMBDA
+  LAMBDA --> LROLE
+  LROLE -->|"List buckets\nGet encryption config"| S3
+  LAMBDA -->|"AI analysis"| AI
 ```
 
 ---
 
 ## Optional (Learning Mode): Cursor + AWS MCP
+
 This project was initially developed following a guided workflow using **Cursor + AWS MCP**.
 
 **What it was used for:**
-- Quickly creating test S3 buckets and misconfigurations for validation
-- Running AWS actions through natural language (“fix critical S3 buckets”) during learning
+
+* Quickly creating test S3 buckets and misconfigurations for validation
+* Running AWS actions through natural language (“fix critical S3 buckets”) during learning
 
 **Do you need it for production/GitHub Actions?**
 No — the production pipeline in this repo runs using **Python scripts + GitHub Actions + AWS OIDC**. Cursor/MCP is optional and not required to replicate the automation.
@@ -87,7 +111,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 aws configure
 python scanner.py --output findings.json --fail-on CRITICAL
-````
+```
 
 ---
 
@@ -98,8 +122,11 @@ python scanner.py --output findings.json --fail-on CRITICAL
 * **`.github/workflows/scan.yml`**
 
   * Scheduled daily scan + manual trigger
-  * Uploads `findings.json` as an artifact
-  * Fails the run when **CRITICAL** findings exist (intended “security gate” behavior)
+  * Runs two checks:
+
+    * **Public access scan** via `scanner.py` (uploads `findings.json`)
+    * **Encryption AI scan** by invoking Lambda `s3-security-scanner` (uploads `encryption_scan_response.json`)
+  * Fails the run when **CRITICAL** public access findings exist (intended “security gate” behavior)
 
 * **`.github/workflows/remediate.yml`**
 
@@ -114,6 +141,8 @@ To keep this repo fork-friendly (and avoid exposing account-specific ARNs), work
 
 * `AWS_SCAN_ROLE_ARN`
 * `AWS_REMEDIATE_ROLE_ARN`
+
+> The Gemini API key is stored as a **Lambda environment variable** (`GOOGLE_API_KEY`), not in GitHub.
 
 ---
 
@@ -194,6 +223,7 @@ Attach them to the roles as inline policies or managed policies.
 
 * `s3:ListAllMyBuckets`
 * `s3:GetBucketPublicAccessBlock`
+* `lambda:InvokeFunction` (to invoke the encryption scanner Lambda)
 
 **Remediate Role requires:**
 
@@ -219,20 +249,62 @@ GitHub repo → Settings → Environments:
 
 ---
 
-## 4) Run workflows
+## 4) Deploy the Encryption AI Scanner Lambda (add-on)
+
+This repo includes the Lambda source under:
+
+* `encryption-ai-scanner/s3_scanner.py`
+* `encryption-ai-scanner/README.md`
+* `encryption-ai-scanner/packaging-notes.md`
+
+**Lambda configuration:**
+
+* Function name: `s3-security-scanner` (recommended)
+* Runtime: Python 3.12
+* Handler: `s3_scanner.lambda_handler`
+* Timeout: 30 seconds
+* Environment variable:
+
+  * `GOOGLE_API_KEY` = your Gemini API key
+
+**Lambda IAM Role:**
+
+* Create a role like `LambdaS3ScannerRole` with:
+
+  * `s3:ListAllMyBuckets`
+  * `s3:GetEncryptionConfiguration`
+  * `AWSLambdaBasicExecutionRole` (CloudWatch Logs)
+
+> Note: Gemini access requires billing/quota enabled on the Google project used by your API key.
+
+---
+
+## 5) Run workflows
 
 * Actions → **S3 Security Scan**
+
+  * Confirms public access posture + uploads `findings.json`
+  * Invokes the encryption Lambda + uploads `encryption_scan_response.json`
+
 * Actions → **S3 Remediation (Manual)**
 
 ---
 
 ## Attribution
 
-This project was completed as part of a guided learning workflow from **NextWork - Build an AI Security Guard for AWS** and extended with:
+This repo combines learnings and implementations inspired by two guided projects from the NextWork **Security × AI** series:
 
-* Production-style GitHub Actions pipeline
-* OIDC-based AWS auth (no long-lived AWS keys)
-* Controlled remediation workflow (approval gate + verification scan)
-* Fork-friendly setup (role ARNs stored in GitHub Secrets)
+- **Build an AI Security Guard for AWS** — focused on scanning S3 buckets for security misconfigurations (e.g., public access controls) and building a repeatable guard pattern.
+- **AI Security Scanner for AWS S3** — focused on scanning S3 bucket encryption posture and generating AI-powered security insights (Gemini), including serverless Lambda deployment patterns.
 
+On top of the NextWork baseline, this repo extends the ideas into a production-style workflow with:
+- GitHub Actions automation (scheduled scans + manual remediation)
+- AWS IAM + GitHub OIDC (no long-lived AWS keys)
+- Approval-gated remediation with verification scans
+- A modular structure that keeps both scanners under one security automation pipeline
 
+If you want more hands-on project ideas in the same style (Security × AI × AWS), check out NextWork here: https://learn.nextwork.org/
+
+```
+::contentReference[oaicite:0]{index=0}
+```

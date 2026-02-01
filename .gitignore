@@ -11,3 +11,7 @@ remediation*.json
 
 # OS
 .DS_Store
+
+encryption-ai-scanner/package/
+encryption-ai-scanner/*.zip
+

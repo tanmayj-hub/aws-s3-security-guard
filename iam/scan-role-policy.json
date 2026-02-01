@@ -12,6 +12,12 @@
       "Effect": "Allow",
       "Action": "s3:GetBucketPublicAccessBlock",
       "Resource": "arn:aws:s3:::*"
+    },
+    {
+      "Sid": "InvokeEncryptionScannerLambda",
+      "Effect": "Allow",
+      "Action": "lambda:InvokeFunction",
+      "Resource": "arn:aws:lambda:us-east-1:<AWS_ACCOUNT_ID>:function:s3-security-scanner"
     }
   ]
 }
