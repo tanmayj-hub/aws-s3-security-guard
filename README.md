@@ -1,4 +1,3 @@
-````md
 # AWS S3 Security Guard (Scanner + Remediation)
 
 A lightweight AWS security automation project that:
@@ -305,6 +304,3 @@ On top of the NextWork baseline, this repo extends the ideas into a production-s
 
 If you want more hands-on project ideas in the same style (Security × AI × AWS), check out NextWork here: https://learn.nextwork.org/
 
-```
-::contentReference[oaicite:0]{index=0}
-```
