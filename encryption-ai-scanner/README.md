@@ -1,35 +1,85 @@
-# Encryption AI Scanner (S3) — Lambda + Gemini
+# encryption-ai-scanner (Lambda + Gemini)
 
-This module scans all S3 buckets in your AWS account, checks whether default bucket encryption is enabled, and generates a short, actionable AI security summary using Gemini.
+An AWS Lambda-based scanner that:
+1) Lists S3 buckets in your account
+2) Checks server-side encryption configuration for each bucket
+3) Uses Gemini to generate a short, actionable security assessment
 
-## What it does
-- Lists S3 buckets
-- Checks bucket encryption configuration (AES256 vs aws:kms vs none)
-- Returns:
-  - per-bucket encryption status
-  - a concise AI recommendation summary
-
-## Files
-- `s3_scanner.py` — Lambda handler and scan logic
-- `requirements.txt` — dependencies for the Lambda package
-- `packaging-notes.md` — packaging instructions (local + GitHub Actions)
+This module complements the main repo’s S3 security guard by adding **encryption posture scanning + AI insights**.
 
 ---
 
-## Deployment (first-time)
+## Start Here (Recommended Order)
+1) Read the repo root `README.md` first (it explains the full pipeline + GitHub Actions + IAM).
+2) Then read this file (module behavior and AWS setup).
+3) Then follow `packaging-notes.md` to build and deploy the Lambda ZIP.
 
-This module must be deployed as an AWS Lambda function **once** before it can be invoked by GitHub Actions.
+---
 
-You have two ways to produce the deployment ZIP (`s3_scanner.zip`):
+## What it scans
+- **S3 server-side encryption**
+  - Detects whether default encryption is enabled
+  - Captures encryption type (e.g., `AES256`, `aws:kms`, or `None`)
 
-- **Option A (recommended): build locally** — follow `packaging-notes.md`
-- **Option B (no local build): build in GitHub Actions** — run `.github/workflows/build-encryption-lambda-zip.yml` and download the artifact
+---
 
-After uploading the ZIP to AWS Lambda, configure:
+## How it connects to the repo pipeline
+- GitHub Actions can **invoke** this Lambda from `.github/workflows/scan.yml`
+- Lambda runs using its own IAM execution role (`LambdaS3ScannerRole`)
+- Results are returned to the workflow and uploaded as `encryption_scan_response.json`
+
+> Note: GitHub Actions does not deploy this Lambda code by default. You deploy it once, then Actions invokes it.
+
+---
+
+## AWS setup (one-time)
+### 1) Create the Lambda function
 - Runtime: Python 3.12
+- Function name: `s3-security-scanner` (recommended)
 - Handler: `s3_scanner.lambda_handler`
 - Timeout: 30 seconds
-- Environment variable: `GOOGLE_API_KEY`
 
-Then enable the optional step in `.github/workflows/scan.yml`:
-- `ENABLE_ENCRYPTION_AI_SCAN: "true"`
+### 2) Add environment variable
+- `GOOGLE_API_KEY` = your Gemini API key
+
+### 3) IAM Role for Lambda (execution role)
+Attach:
+- Custom policy allowing:
+  - `s3:ListAllMyBuckets`
+  - `s3:GetEncryptionConfiguration`
+- AWS managed policy:
+  - `AWSLambdaBasicExecutionRole` (CloudWatch logging)
+
+---
+
+## Packaging and deployment
+Follow: `packaging-notes.md`
+
+Two ways to get `s3_scanner.zip`:
+- Build locally (recommended) via pip + zip
+- Or run `.github/workflows/build-encryption-lambda-zip.yml` to generate the ZIP as a GitHub Actions artifact
+
+---
+
+## Output format
+The Lambda returns JSON like:
+
+```json
+{
+  "total_buckets": 7,
+  "unencrypted_buckets": 0,
+  "encrypted_buckets": 7,
+  "scan_results": [
+    { "bucket_name": "example", "encrypted": true, "encryption_type": "AES256" }
+  ],
+  "ai_analysis": "Short security summary...",
+  "alert": false
+}
+````
+
+---
+
+## Notes
+
+* If Gemini billing/quota isn’t enabled, `ai_analysis` may return an API error message (S3 scan still succeeds).
+* Keep API keys out of source control. Use Lambda environment variables (or AWS Secrets Manager/SSM for advanced setups).
