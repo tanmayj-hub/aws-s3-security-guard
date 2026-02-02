@@ -15,6 +15,8 @@ This module is deployed as an AWS Lambda function. Lambda runs in a Linux enviro
 
 From repo root:
 
+> Important: run these commands from the `encryption-ai-scanner/` folder (it contains the module `requirements.txt`).
+
 ```powershell
 cd encryption-ai-scanner
 
@@ -32,6 +34,8 @@ Compress-Archive -Path .\package\* -DestinationPath .\s3_scanner.zip -Force
 
 Upload `encryption-ai-scanner/s3_scanner.zip` to Lambda.
 
+> macOS/Linux users: easiest path is Option B (build the zip using GitHub Actions). You can also build locally using standard `zip` commands if you prefer.
+
 ---
 
 ## Option B — Build ZIP using GitHub Actions (no local build)
@@ -40,8 +44,8 @@ If you don’t want to build locally:
 
 1. Go to GitHub → Actions
 2. Run: `.github/workflows/build-encryption-lambda-zip.yml`
-3. Download artifact: `s3_scanner.zip`
-4. Upload it to AWS Lambda (Code → Upload from → .zip file)
+3. Download the artifact (often named something like `s3_scanner_lambda_zip`)
+4. Inside it, you’ll find `s3_scanner.zip` — upload that to AWS Lambda (Code → Upload from → .zip file)
 
 ---
 
@@ -56,7 +60,7 @@ If you don’t want to build locally:
 * Lambda execution role:
 
   * S3 permissions: list buckets + read encryption configuration
-  * CloudWatch logging permissions
+  * CloudWatch logging permissions (`AWSLambdaBasicExecutionRole`)
 
 ---
 
@@ -73,5 +77,3 @@ Expected:
 * `statusCode: 200`
 * `scan_results` array listing each bucket’s encryption status
 * `ai_analysis` with a short security summary (requires valid API key + billing/quota enabled)
-
-```

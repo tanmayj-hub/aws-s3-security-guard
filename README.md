@@ -1,10 +1,12 @@
 # AWS S3 Security Guard (Scanner + Remediation)
 
-A lightweight AWS security automation project that:
-- Scans S3 buckets for **public access misconfigurations**
-- Produces **severity-based findings** (e.g., CRITICAL) in a JSON report
-- Optionally remediates CRITICAL findings by enforcing **S3 Block Public Access**
-- Verifies fixes by re-running the scanner
+A lightweight AWS security automation repo that helps you catch and fix common S3 security risks *before they turn into incidents*.
+
+### Real-world problems this solves
+- **Prevents accidental data exposure** from misconfigured S3 public access settings (a common source of leaks).
+- Replaces manual “check S3 settings in console” audits with **repeatable, scheduled security checks**.
+- Adds an optional **encryption posture scan** with an AI-generated summary to speed up review and reporting.
+- Supports teams that want a simple security gate in CI/CD: **scan → fail on critical findings → remediate with approval → verify**.
 
 This repo includes a **production-style GitHub Actions integration** (scheduled scans + manual remediation with approvals).
 
@@ -15,72 +17,6 @@ This repo includes a **production-style GitHub Actions integration** (scheduled 
 
 ---
 
-## Start Here — Fork & Replicate (Recommended Order)
-
-This repo contains:
-- **Scanner #1:** Public access misconfig scan (runs in GitHub Actions via `scanner.py`)
-- **Remediation:** Manual + approval-gated remediation (via `remediate.py`)
-- **Scanner #2 (Add-on):** Encryption posture + AI analysis (runs in AWS Lambda, invoked by GitHub Actions)
-
-If you’re forking for the first time, follow this exact order so nothing “mysteriously fails”.
-
-### 1) Read these files in this order
-1. **Root `README.md`** (this file) — full setup + workflows + architecture
-2. `iam/` — trust policy template + IAM permissions policies
-3. `encryption-ai-scanner/README.md` — what the Lambda module does + how it connects
-4. `encryption-ai-scanner/packaging-notes.md` — how to build/upload the Lambda ZIP (first-time deployment)
-
-### 2) What you need to set up (high level)
-1. **AWS IAM OIDC** (one-time per AWS account): lets GitHub Actions assume AWS roles securely (no static keys)
-2. **Two GitHub Actions roles** in AWS:
-   - `SecurityGuardScanRole` (read-only + optional Lambda invoke)
-   - `SecurityGuardRemediateRole` (write permissions to apply S3 Block Public Access)
-3. **Encryption AI Lambda deployed once in AWS** (only if you enable the add-on):
-   - Function name: `s3-security-scanner`
-   - Execution role: `LambdaS3ScannerRole`
-   - Env var: `GOOGLE_API_KEY` (Gemini API key)
-
-### 3) Important: Why the Lambda role is separate from the GitHub Actions role
-- **GitHub Actions role (`AWS_SCAN_ROLE_ARN`)**: assumed by GitHub Actions via OIDC to run the workflow and optionally **invoke** Lambda.
-- **Lambda execution role (`LambdaS3ScannerRole`)**: assumed by Lambda **at runtime** to read S3 encryption settings and write CloudWatch logs.
-
-> Translation: GitHub Actions triggers Lambda — but Lambda runs using its own IAM role.
-
-### 4) First-time replication checklist (recommended)
-✅ Create AWS OIDC provider → create roles → set GitHub secrets  
-✅ Run **S3 Security Scan** workflow (manual) → confirm `findings.json` artifact  
-✅ (Optional) Deploy the encryption Lambda once → enable encryption scan toggle → confirm second artifact uploads
-
----
-
-## Gemini API Key + Billing Setup (Required for AI Analysis)
-
-The encryption scanner Lambda calls Gemini to generate a short AI security summary.
-
-To make AI analysis work, you need:
-1) A **Gemini API key**
-2) **Billing enabled** on the Google project behind that API key (otherwise you may see quota / 429 errors)
-
-### Step A — Create a Gemini API key (Google AI Studio)
-1. Open Google AI Studio: https://aistudio.google.com/
-2. Sign in and create/select a project
-3. Generate an API key (“Get API key”)
-4. Copy the key
-
-### Step B — Enable Billing (fixes `RESOURCE_EXHAUSTED` / quota issues)
-1. Open Google Cloud Billing: https://console.cloud.google.com/billing
-2. Add/link a billing account to the same project used in AI Studio
-3. Wait a few minutes, then re-test the Lambda
-
-### Step C — Store the API key in Lambda (best practice)
-AWS Lambda → your function → **Configuration → Environment variables**:
-- Key: `GOOGLE_API_KEY`
-- Value: `<your Gemini API key>`
-
-> Do **not** commit API keys into the repo.
-
----
-
 ## Tech Stack
 - **Python 3.12**
 - **boto3 / botocore** (AWS SDK for Python)
@@ -88,7 +24,7 @@ AWS Lambda → your function → **Configuration → Environment variables**:
 - **GitHub Actions**
 - **AWS IAM + GitHub OIDC** (no long-lived AWS keys)
 - **AWS Lambda** (encryption scanner add-on)
-- **Gemini API (google-genai / google-genai client)** (AI analysis inside the Lambda)
+- **Gemini API (google-genai)** (AI analysis inside the Lambda)
 
 ---
 
@@ -168,15 +104,64 @@ No — the production pipeline in this repo runs using **Python scripts + GitHub
 
 ---
 
-## Local Setup (Windows PowerShell)
+## Start Here — Fork & Replicate (Recommended Order)
 
-```powershell
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-aws configure
-python scanner.py --output findings.json --fail-on CRITICAL
-```
+This repo contains:
+
+* **Scanner #1:** Public access misconfig scan (GitHub Actions runs `scanner.py`)
+* **Remediation:** Manual + approval-gated remediation (via `remediate.py`)
+* **Scanner #2 (Optional Add-on):** Encryption posture + AI analysis (AWS Lambda, invoked by Actions)
+
+### Choose your path
+
+* **Minimal setup (fastest):** Public access scan + optional remediation (no Lambda / no Gemini)
+* **Full setup:** Add encryption Lambda + Gemini AI summary + optional Lambda invocation from scans
+
+### 1) Read these files in this order
+
+1. **Root `README.md`** (this file)
+2. `iam/` — trust policy template + IAM permissions policies
+3. `encryption-ai-scanner/README.md` — encryption Lambda behavior + AWS setup
+4. `encryption-ai-scanner/packaging-notes.md` — build/upload Lambda ZIP (first-time deployment)
+
+### 2) First-time replication checklist
+
+✅ Create AWS OIDC provider → create roles → set GitHub secrets
+✅ Run **S3 Security Scan** workflow (manual) → confirm `findings.json` artifact
+✅ (Optional) Deploy encryption Lambda once → enable encryption scan toggle → confirm second artifact uploads
+
+---
+
+## Gemini API Key + Billing Setup (Required for AI Analysis)
+
+The encryption scanner Lambda calls Gemini to generate a short AI security summary.
+
+To make AI analysis work, you need:
+
+1. A **Gemini API key**
+2. **Billing enabled** on the Google project behind that API key (otherwise you may see quota / 429 errors)
+
+### Step A — Create a Gemini API key (Google AI Studio)
+
+1. Open Google AI Studio: [https://aistudio.google.com/](https://aistudio.google.com/)
+2. Sign in and create/select a project
+3. Generate an API key (“Get API key”)
+4. Copy the key
+
+### Step B — Enable Billing (fixes `RESOURCE_EXHAUSTED` / quota issues)
+
+1. Open Google Cloud Billing: [https://console.cloud.google.com/billing](https://console.cloud.google.com/billing)
+2. Add/link a billing account to the same project used in AI Studio
+3. Wait a few minutes, then re-test the Lambda
+
+### Step C — Store the API key in Lambda (best practice)
+
+AWS Lambda → your function → **Configuration → Environment variables**:
+
+* Key: `GOOGLE_API_KEY`
+* Value: `<your Gemini API key>`
+
+> Do **not** commit API keys into the repo.
 
 ---
 
@@ -187,36 +172,19 @@ python scanner.py --output findings.json --fail-on CRITICAL
 * **`.github/workflows/scan.yml`**
 
   * Scheduled daily scan + manual trigger
-  * Runs **Public access scan** via `scanner.py` (uploads `findings.json`)
-  * Optionally invokes **Encryption AI scan** Lambda `s3-security-scanner` (uploads `encryption_scan_response.json`)
-  * Fails the run when **CRITICAL** public access findings exist (intended “security gate” behavior)
-
-  **Note about the encryption scan:**
-
-  * Fresh forks won’t have the Lambda deployed yet, so encryption scan is designed to be **optional**
-  * Enable it after deployment by setting `ENABLE_ENCRYPTION_AI_SCAN: "true"` in `scan.yml`
+  * Runs public access scan via `scanner.py` (uploads `findings.json`)
+  * Optionally invokes encryption Lambda and uploads `encryption_scan_response.json`
+  * Fails when CRITICAL public access findings exist
 
 * **`.github/workflows/remediate.yml`**
 
   * Manual trigger only
   * Runs: scan → remediate → re-scan verification
-  * `approve=false` = dry-run, `approve=true` = apply changes
-  * Recommended: keep remediation behind an approval gate via GitHub Environments
+  * Recommended behind a GitHub Environment approval gate
 
 * **`.github/workflows/build-encryption-lambda-zip.yml`** (optional helper)
 
-  * Builds `encryption-ai-scanner/s3_scanner.zip` as a GitHub Actions artifact
-  * Useful for people who don’t want to build ZIPs locally
-  * You still upload the ZIP into AWS Lambda once (first-time deployment)
-
-### Important: no ARNs in the repo
-
-To keep this repo fork-friendly (and avoid exposing account-specific ARNs), workflows read role ARNs from **GitHub Secrets**:
-
-* `AWS_SCAN_ROLE_ARN`
-* `AWS_REMEDIATE_ROLE_ARN`
-
-> The Gemini API key is stored as a **Lambda environment variable** (`GOOGLE_API_KEY`), not in GitHub.
+  * Builds `encryption-ai-scanner/s3_scanner.zip` as an Actions artifact for users who don’t want local builds
 
 ---
 
@@ -241,40 +209,15 @@ Create two roles:
 * `SecurityGuardScanRole` (read-only scan + optional Lambda invoke)
 * `SecurityGuardRemediateRole` (applies S3 Block Public Access)
 
-### 1A) Create role using Web Identity
+Use:
 
-For each role:
+* Trust policy template: `iam/github-oidc-trust-policy-template.json`
+* Permissions policies:
 
-1. AWS Console → IAM → Roles → **Create role**
-2. Trusted entity type: **Web identity**
-3. Identity provider: `token.actions.githubusercontent.com`
-4. Audience: `sts.amazonaws.com`
-5. Continue → create role (attach permissions next)
+  * `iam/scan-role-policy.json`
+  * `iam/remediate-role-policy.json`
 
-### 1B) Trust policy (Web Identity)
-
-Use `iam/github-oidc-trust-policy-template.json` as a template and replace placeholders:
-
-* `<AWS_ACCOUNT_ID>` = your AWS account id
-* `OWNER/REPO` = your GitHub repo fork (e.g., `yourname/aws-s3-security-guard`)
-* Branch is `main`
-
-### 1C) Permissions policies
-
-This repo provides ready-to-use policies in `/iam/`:
-
-* Scan role policy: `iam/scan-role-policy.json`
-* Remediate role policy: `iam/remediate-role-policy.json`
-
-Scan Role requires:
-
-* `s3:ListAllMyBuckets`
-* `s3:GetBucketPublicAccessBlock`
-* (Optional add-on) `lambda:InvokeFunction` to invoke `s3-security-scanner`
-
-Remediate Role requires:
-
-* same as scan role, plus `s3:PutBucketPublicAccessBlock`
+> Note: `iam/scan-role-policy.json` includes a placeholder `<AWS_ACCOUNT_ID>` for the Lambda ARN. Replace it with your account id (and confirm region + function name).
 
 ---
 
@@ -296,42 +239,16 @@ GitHub repo → Settings → Environments:
 
 ---
 
-## 4) Deploy the Encryption AI Scanner Lambda (add-on)
+## 4) Deploy the Encryption AI Scanner Lambda (optional add-on)
 
-This repo includes the Lambda source under:
+See:
 
-* `encryption-ai-scanner/s3_scanner.py`
 * `encryption-ai-scanner/README.md`
 * `encryption-ai-scanner/packaging-notes.md`
 
-### First-time deployment (important)
+After deploying the Lambda, enable invocation in `.github/workflows/scan.yml`:
 
-GitHub Actions can only **invoke** this Lambda. In a fresh fork, the Lambda does not exist yet.
-Deploy it **once** in AWS before enabling encryption scan in the workflow.
-
-**Option A (recommended): Build + upload locally**
-
-* Follow `encryption-ai-scanner/packaging-notes.md` to create `s3_scanner.zip`
-* Upload the ZIP in the Lambda console
-
-**Option B (no local build): Build the ZIP using GitHub Actions**
-
-* Run the workflow: `.github/workflows/build-encryption-lambda-zip.yml`
-* Download the `s3_scanner.zip` artifact
-* Upload it in the Lambda console
-
-After the Lambda exists:
-
-* Set `ENABLE_ENCRYPTION_AI_SCAN: "true"` in `.github/workflows/scan.yml`
-
-**Lambda configuration:**
-
-* Function name: `s3-security-scanner` (recommended)
-* Runtime: Python 3.12
-* Handler: `s3_scanner.lambda_handler`
-* Timeout: 30 seconds
-* Environment variable: `GOOGLE_API_KEY` = Gemini API key
-* Execution role: `LambdaS3ScannerRole`
+* `ENABLE_ENCRYPTION_AI_SCAN: "true"`
 
 ---
 
@@ -339,12 +256,10 @@ After the Lambda exists:
 
 Actions → **S3 Security Scan**
 
-* Public access scan runs and uploads `findings.json`
-* If enabled, encryption scan invokes Lambda and uploads `encryption_scan_response.json`
+* Uploads `findings.json`
+* If enabled, uploads `encryption_scan_response.json`
 
 Actions → **S3 Remediation (Manual)**
-
-* Manual remediation with approval gate
 
 ---
 

@@ -33,6 +33,7 @@ This module complements the main repo’s S3 security guard by adding **encrypti
 ---
 
 ## AWS setup (one-time)
+
 ### 1) Create the Lambda function
 - Runtime: Python 3.12
 - Function name: `s3-security-scanner` (recommended)
