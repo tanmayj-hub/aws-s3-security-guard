@@ -46,9 +46,9 @@ jobs:
 
           ls -lh s3_scanner.zip
 
-      - name: Upload ZIP artifact
+      - name: Upload Lambda ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: s3_scanner_lambda_zip
+          name: s3_scanner
           path: encryption-ai-scanner/s3_scanner.zip
           if-no-files-found: error

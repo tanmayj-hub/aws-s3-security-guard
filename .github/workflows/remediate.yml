@@ -8,7 +8,11 @@ on:
         required: true
         default: "false"
       allow_buckets:
-        description: "Optional: comma-separated allowlist of buckets to target (recommended for testing)."
+        description: "Optional: comma-separated allowlist of buckets to target (recommended for testing). Overrides exclude_buckets."
+        required: false
+        default: ""
+      exclude_buckets:
+        description: "Optional: comma-separated bucket names to EXCLUDE from remediation (e.g., logs-bucket,tf-state-bucket). Only affects remediation + verification."
         required: false
         default: ""
 
@@ -52,6 +56,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_REMEDIATE_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # Baseline scan: keep your original behavior (full scan unless allow_buckets explicitly provided)
       - name: Run scanner (baseline)
         shell: bash
         run: |
@@ -62,47 +67,124 @@ jobs:
           fi
 
       - name: Upload baseline findings
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: s3-findings-before
           path: findings.json
           if-no-files-found: error
 
+      # Compute remediation targets:
+      # - If allow_buckets is set -> use it (override)
+      # - Else -> targets = all buckets in findings.json minus exclude_buckets
+      - name: Compute remediation target buckets
+        shell: bash
+        env:
+          INPUT_ALLOW: ${{ github.event.inputs.allow_buckets }}
+          INPUT_EXCLUDE: ${{ github.event.inputs.exclude_buckets }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          input_allow = (os.getenv("INPUT_ALLOW") or "").strip()
+          input_exclude = (os.getenv("INPUT_EXCLUDE") or "").strip()
+
+          # If allowlist is provided, it overrides exclusions and findings-derived list.
+          if input_allow:
+              print(f"Using allow_buckets override: {input_allow}")
+              allow_final = input_allow
+          else:
+              findings_path = Path("findings.json")
+              if not findings_path.exists():
+                  raise SystemExit("findings.json not found. Baseline scan must run before this step.")
+
+              data = json.loads(findings_path.read_text(encoding="utf-8"))
+
+              # Support common structures:
+              # 1) {"findings":[{...},{...}], ...}
+              # 2) [{...},{...}]
+              findings = data.get("findings") if isinstance(data, dict) else data
+              if not isinstance(findings, list):
+                  raise SystemExit("Unexpected findings.json structure: expected list or dict with 'findings' list.")
+
+              buckets = []
+              for f in findings:
+                  if isinstance(f, dict):
+                      b = f.get("bucket") or f.get("bucket_name") or f.get("Bucket")
+                      if b:
+                          buckets.append(str(b))
+
+              # Unique in stable order
+              seen = set()
+              all_buckets = []
+              for b in buckets:
+                  if b not in seen:
+                      seen.add(b)
+                      all_buckets.append(b)
+
+              # Parse excludes
+              excludes = [x.strip() for x in input_exclude.split(",") if x.strip()]
+              exclude_set = set(excludes)
+
+              targets = [b for b in all_buckets if b not in exclude_set]
+              allow_final = ",".join(targets)
+
+              print(f"Buckets in findings: {len(all_buckets)}")
+              print(f"Excluded buckets: {len(exclude_set)} -> {sorted(exclude_set) if exclude_set else []}")
+              print(f"Remediation targets: {len(targets)}")
+
+          # Export for later steps
+          env_file = os.environ.get("GITHUB_ENV")
+          if env_file:
+              with open(env_file, "a", encoding="utf-8") as f:
+                  f.write(f"REMEDIATE_ALLOW_BUCKETS={allow_final}\n")
+
+          print(f"REMEDIATE_ALLOW_BUCKETS={allow_final}")
+          PY
+
       - name: Remediate (dry-run unless approved)
         shell: bash
         run: |
-          ALLOW="${{ github.event.inputs.allow_buckets }}"
+          ALLOW="${REMEDIATE_ALLOW_BUCKETS}"
+
+          if [ -z "$ALLOW" ]; then
+            echo "No remediation targets (after exclusions / findings). Skipping remediation."
+            # Still produce a remediation.json so artifact upload doesn't fail
+            echo '{"skipped": true, "reason": "No remediation targets (empty allow list)"}' > remediation.json
+            exit 0
+          fi
+
           if [ "${{ github.event.inputs.approve }}" = "true" ]; then
-            if [ -n "$ALLOW" ]; then
-              python remediate.py --input findings.json --approve --allow-buckets "$ALLOW" --output remediation.json
-            else
-              python remediate.py --input findings.json --approve --output remediation.json
-            fi
+            python remediate.py --input findings.json --approve --allow-buckets "$ALLOW" --output remediation.json
           else
-            if [ -n "$ALLOW" ]; then
-              python remediate.py --input findings.json --allow-buckets "$ALLOW" --output remediation.json
-            else
-              python remediate.py --input findings.json --output remediation.json
-            fi
+            python remediate.py --input findings.json --allow-buckets "$ALLOW" --output remediation.json
           fi
 
       - name: Upload remediation report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: s3-remediation-report
           path: remediation.json
           if-no-files-found: error
 
-      - name: Re-scan to verify
+      # Verification: verify only the buckets we targeted for remediation.
+      # This prevents excluded buckets (still misconfigured) from failing the remediation run.
+      - name: Re-scan to verify (targets only)
         shell: bash
         run: |
-          if [ -n "${{ github.event.inputs.allow_buckets }}" ]; then
-            python scanner.py --output findings_after.json --fail-on CRITICAL --allow-buckets "${{ github.event.inputs.allow_buckets }}"
+          ALLOW="${REMEDIATE_ALLOW_BUCKETS}"
+
+          if [ -z "$ALLOW" ]; then
+            echo "No remediation targets. Running verification scan in non-blocking mode."
+            python scanner.py --output findings_after.json --fail-on NONE
           else
-            python scanner.py --output findings_after.json --fail-on CRITICAL
+            python scanner.py --output findings_after.json --fail-on CRITICAL --allow-buckets "$ALLOW"
           fi
 
       - name: Upload verification findings
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: s3-findings-after
