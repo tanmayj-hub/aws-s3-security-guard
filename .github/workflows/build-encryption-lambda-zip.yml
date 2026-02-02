@@ -1,0 +1,54 @@
+name: Build Encryption AI Scanner Lambda ZIP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-zip:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: encryption-ai-scanner
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Lambda package (Linux)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf package s3_scanner.zip
+
+          python -m pip install --upgrade pip
+          mkdir -p package
+
+          # Install Linux-compatible dependencies into ./package
+          pip install --platform manylinux2014_x86_64 \
+            --target ./package \
+            --implementation cp \
+            --python-version 3.12 \
+            --only-binary=:all: \
+            -r requirements.txt
+
+          cp s3_scanner.py package/
+          cd package
+          zip -r ../s3_scanner.zip .
+          cd ..
+
+          ls -lh s3_scanner.zip
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3_scanner_lambda_zip
+          path: encryption-ai-scanner/s3_scanner.zip
+          if-no-files-found: error

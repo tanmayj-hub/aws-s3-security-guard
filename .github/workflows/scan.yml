@@ -16,6 +16,10 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
+
+  # --- Optional: Encryption AI Scanner Lambda ---
+  # Set to "true" only AFTER you have deployed the Lambda (Function name below) and granted Invoke permissions.
+  ENABLE_ENCRYPTION_AI_SCAN: "false"
   ENCRYPTION_SCANNER_FUNCTION_NAME: s3-security-scanner
 
 jobs:
@@ -70,8 +74,9 @@ jobs:
           path: findings.json
           if-no-files-found: error
 
-      # --- NEW: Invoke Encryption AI Scanner Lambda ---
+      # --- Optional: Invoke Encryption AI Scanner Lambda ---
       - name: Invoke encryption AI scanner (Lambda)
+        if: ${{ env.ENABLE_ENCRYPTION_AI_SCAN == 'true' }}
         shell: bash
         run: |
           echo "Invoking Lambda: ${{ env.ENCRYPTION_SCANNER_FUNCTION_NAME }}"
@@ -86,6 +91,7 @@ jobs:
           cat encryption_scan_response.json
 
       - name: Upload encryption scan artifact
+        if: ${{ env.ENABLE_ENCRYPTION_AI_SCAN == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: s3-encryption-ai-scan
