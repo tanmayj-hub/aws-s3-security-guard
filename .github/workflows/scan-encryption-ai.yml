@@ -1,0 +1,116 @@
+name: S3 Encryption Scan (AI via Lambda)
+
+on:
+  workflow_dispatch:
+    inputs:
+      function_name:
+        description: "Lambda function name (or full ARN) for the encryption scanner"
+        required: true
+        default: "s3-security-scanner"
+      payload:
+        description: "Optional JSON payload to send to the Lambda (string). Leave default unless you know you need it."
+        required: false
+        default: '{"trigger":"github-actions","scan":"s3-encryption"}'
+      fail_on_alert:
+        description: "Set to true to fail the workflow if the Lambda returns alert=true"
+        required: true
+        default: "false"
+  schedule:
+    - cron: "30 9 * * *" # Daily 09:30 UTC (offset from public scan)
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  encryption_scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.AWS_SCAN_ROLE_ARN }}" ]; then
+            echo "Missing GitHub secret: AWS_SCAN_ROLE_ARN"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_SCAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Invoke encryption scanner Lambda
+        id: invoke
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FUNC="${{ github.event.inputs.function_name }}"
+          PAYLOAD='${{ github.event.inputs.payload }}'
+
+          echo "Invoking Lambda: ${FUNC}"
+          echo "Payload: ${PAYLOAD}"
+
+          # Invoke Lambda and capture its response body to a JSON file.
+          aws lambda invoke \
+            --function-name "${FUNC}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload "${PAYLOAD}" \
+            encryption_scan_response.json >/dev/null
+
+          echo "Lambda response saved to encryption_scan_response.json"
+          echo "----- Raw Lambda response -----"
+          cat encryption_scan_response.json || true
+          echo "-------------------------------"
+
+      - name: Upload encryption scan response
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-encryption-ai-scan
+          path: encryption_scan_response.json
+          if-no-files-found: error
+
+      - name: Gate on alert (optional)
+        if: ${{ github.event.inputs.fail_on_alert == 'true' }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+
+          p = Path("encryption_scan_response.json")
+          if not p.exists():
+              print("Missing encryption_scan_response.json")
+              sys.exit(2)
+
+          resp = json.loads(p.read_text(encoding="utf-8"))
+
+          # Lambda proxy integrations often return {"statusCode":..., "body":"{...json...}"}
+          body = resp.get("body", resp)
+          if isinstance(body, str):
+              try:
+                  body = json.loads(body)
+              except Exception:
+                  body = {}
+
+          alert = bool(body.get("alert", False))
+          unenc = body.get("unencrypted_buckets")
+
+          print(f"alert={alert}, unencrypted_buckets={unenc}")
+
+          if alert:
+              print("Encryption scan reported ALERT=true. Failing as requested.")
+              sys.exit(2)
+
+          print("No alert. Passing.")
+          sys.exit(0)
+          PY

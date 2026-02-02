@@ -1,4 +1,4 @@
-name: S3 Security Scan
+name: S3 Public Access Scan
 
 on:
   workflow_dispatch:
@@ -16,11 +16,6 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-
-  # --- Optional: Encryption AI Scanner Lambda ---
-  # Set to "true" only AFTER you have deployed the Lambda (Function name below) and granted Invoke permissions.
-  ENABLE_ENCRYPTION_AI_SCAN: "false"
-  ENCRYPTION_SCANNER_FUNCTION_NAME: s3-security-scanner
 
 jobs:
   scan:
@@ -68,34 +63,11 @@ jobs:
           set -e
 
       - name: Upload findings artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: s3-findings
           path: findings.json
-          if-no-files-found: error
-
-      # --- Optional: Invoke Encryption AI Scanner Lambda ---
-      - name: Invoke encryption AI scanner (Lambda)
-        if: ${{ env.ENABLE_ENCRYPTION_AI_SCAN == 'true' }}
-        shell: bash
-        run: |
-          echo "Invoking Lambda: ${{ env.ENCRYPTION_SCANNER_FUNCTION_NAME }}"
-
-          aws lambda invoke \
-            --function-name "${{ env.ENCRYPTION_SCANNER_FUNCTION_NAME }}" \
-            --cli-binary-format raw-in-base64-out \
-            --payload '{"trigger":"github-actions","scan":"s3-encryption"}' \
-            encryption_scan_response.json
-
-          echo "Lambda response saved to encryption_scan_response.json"
-          cat encryption_scan_response.json
-
-      - name: Upload encryption scan artifact
-        if: ${{ env.ENABLE_ENCRYPTION_AI_SCAN == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: s3-encryption-ai-scan
-          path: encryption_scan_response.json
           if-no-files-found: error
 
       - name: Fail if findings exist
