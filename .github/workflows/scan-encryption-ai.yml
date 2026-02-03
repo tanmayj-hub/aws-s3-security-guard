@@ -15,8 +15,9 @@ on:
         description: "Set to true to fail the workflow if the Lambda returns alert=true"
         required: true
         default: "false"
-  schedule:
-    - cron: "30 9 * * *" # Daily 09:30 UTC (offset from public scan)
+# Uncomment below to enable daily scheduled runs
+#  schedule:
+#    - cron: "30 9 * * *" # Daily 09:30 UTC (offset from public scan)
 
 permissions:
   id-token: write

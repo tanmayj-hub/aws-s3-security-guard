@@ -335,6 +335,22 @@ Actions → **S3 Remediation (Manual)**
 - Set `approve=true` only when ready
 - Uploads: `s3-findings-before`, `s3-remediation-report`, `s3-findings-after`
 
+## Re-enable daily scheduled runs (optional)
+
+By default, the scan workflows are **manual-only** to avoid consuming resources.
+
+To re-enable daily cron schedules:
+1. Open:
+   - `.github/workflows/scan-public-access.yml`
+   - `.github/workflows/scan-encryption-ai.yml`
+2. Find the commented block under `on:`:
+   ```yaml
+   # schedule:
+   #  - cron: "..."
+Uncomment the schedule: lines.
+
+Commit and push.
+
 ---
 
 ## Common errors (quick fixes)
